@@ -1,0 +1,38 @@
+# Everything below is either rebuilt inside the image or must never be baked
+# into it. Getting this wrong is expensive in two opposite directions: a stale
+# node_modules silently ships Windows binaries to a Linux host, and a committed
+# .env silently ships the signing key to anybody who pulls the image.
+
+node_modules
+npm-debug.log*
+
+# Secrets. The container is given these as real environment variables; dotenv
+# finds no file and reads them from the process, which is what it should do here.
+.env
+.env.*
+!.env.example
+
+# The database, and anything that looks like a database. The image creates the
+# schema on first boot and the real file arrives on a mounted volume - a database
+# committed into an image is a database nobody can migrate.
+*.sqlite
+*.sqlite3
+*.db
+*.db-journal
+*.wal
+
+.git
+.gitignore
+Dockerfile
+.dockerignore
+
+# Copied into the image by CI on some platforms, and useless inside a container.
+.vercel
+.next
+Dockerfile.*
+
+# Editor and OS noise.
+.vscode
+.idea
+.DS_Store
+Thumbs.db
