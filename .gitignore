@@ -76,5 +76,10 @@ typings/
 .DS_Store
 Thumbs.db
 
+# Throwaway copies made by the test harnesses. These exist only for the length of a
+# run and each contains a copy of the database - one that must never be committed.
+.catsandbox-*
+*.sandbox-*
+
 # next.js build output
 .next

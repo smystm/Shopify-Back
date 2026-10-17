@@ -54,7 +54,7 @@ router.post('/', authMiddleware, async (req, res, next) => {
       return res.status(400).json({ status: 'fail', message: 'productNumber and title are required' });
     }
 
-    const image = category ? productImageForCategory(category.value, title) : productImageForTitle(title);
+    const image = category ? await productImageForCategory(category.value, title) : await productImageForTitle(title);
 
     // Store the creator so self-add users can edit/delete their own products later.
     const result = await productRepo.create({ productNumber, title, desc, category, price, image, created_by: req.user.id });
@@ -84,7 +84,7 @@ router.put('/:id', authMiddleware, async (req, res, next) => {
       return res.status(403).json({ status: 'fail', message: 'You do not have permission to edit this product' });
     }
 
-    const image = category ? productImageForCategory(category.value, title) : productImageForTitle(title);
+    const image = category ? await productImageForCategory(category.value, title) : await productImageForTitle(title);
     await productRepo.update(id, { productNumber, title, desc, category, price, image });
     const product = await productRepo.findBy('id', id);
 

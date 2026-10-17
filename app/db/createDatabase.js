@@ -244,17 +244,32 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
             // Each folder in skins/ represents a category; update image and category accordingly.
             db.all(`SELECT id, title, category, image FROM products`, (productsErr, products) => {
                 if (productsErr) return;
-                products.forEach(product => {
-                    // Keep an explicitly assigned subcategory image intact. This
-                    // migration only backfills legacy rows with no image value.
-                    if (product.image) return;
-                    const matchedCategory = categoryForTitle(product.title);
-                    if (matchedCategory) {
-                        const newImage = productImageForTitle(product.title);
-                        const categoryJson = JSON.stringify(matchedCategory);
-                        db.run(`UPDATE products SET image = ?, category = ? WHERE id = ?`, [newImage, categoryJson, product.id]);
+
+                // Async because the category lookup is: it reads the products table
+                // to work out which categories exist, rather than listing a folder
+                // of images in another repository. The surrounding code never waited
+                // on this migration, so it still does not - a slow or failing
+                // backfill must not hold up the rest of the boot.
+                void (async () => {
+                    for (const product of products) {
+                        // Keep an explicitly assigned subcategory image intact. This
+                        // migration only backfills legacy rows with no image value.
+                        if (product.image) continue;
+
+                        try {
+                            const matchedCategory = await categoryForTitle(product.title);
+                            if (!matchedCategory) continue;
+
+                            const newImage = await productImageForTitle(product.title);
+                            const categoryJson = JSON.stringify(matchedCategory);
+                            await new Promise((resolve) =>
+                                db.run(`UPDATE products SET image = ?, category = ? WHERE id = ?`, [newImage, categoryJson, product.id], resolve)
+                            );
+                        } catch (err) {
+                            console.warn(`[migrate] could not classify product ${product.id}: ${err.message}`);
+                        }
                     }
-                });
+                })();
             });
         })
 
