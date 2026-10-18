@@ -9,9 +9,12 @@ const phoneVerification = require('../app/services/phoneVerification');
 const { editableFieldsFromBody, buildProfile } = require('../app/services/profile');
 const { normalizePhone, isValidPhone } = require('../app/services/phone');
 
-// Steam only issues trade URLs on this exact path, so anything else is a typo
-// or a phishing link — reject it rather than storing it.
-const tradeUrlPattern = /^https:\/\/steamcommunity\.com\/tradeoffer\/[A-Za-z0-9]+\/?$/i;
+// A customer's trade URL is the link Steam shows behind "Who can send me Trade
+// Offers?" — always /tradeoffer/new/ carrying the partner id and the token in
+// its *query string*. Host and path are pinned so a typo or a phishing
+// look-alike is rejected rather than stored, and both query parameters are
+// required because a link without them trades with nobody.
+const tradeUrlPattern = /^https:\/\/steamcommunity\.com\/tradeoffer\/new\/?\?partner=\d{5,12}&token=[A-Za-z0-9_-]{4,32}\/?$/i;
 
 // Each section of the profile is saved on its own, so an optional field must be
 // clearable. In yup 0.32 `.email()` already ignores the empty string, and

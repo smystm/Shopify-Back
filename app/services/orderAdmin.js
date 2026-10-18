@@ -205,15 +205,16 @@ async function restoreOrder(orderId, status) {
  * and a crash in between cannot strand either half.
  */
 async function registerTradeOffer(orderId, steamOfferUrl) {
-    // Steam's own share links for one specific offer, e.g.
-    // https://steamcommunity.com/tradeoffer/1234567890/ - which is a different
-    // shape from the *trade URL* a profile holds (/tradeoffer/new/?partner=...),
-    // and catching that mix-up here is friendlier than showing a buyer a link
-    // that opens Steam's "make an offer" page instead of the real one.
-    if (typeof steamOfferUrl !== 'string' || !/^https:\/\/steamcommunity\.com\/tradeoffer\/[0-9]+\/?$/.test(steamOfferUrl.trim())) {
+    // Steam has two legitimate shapes an operator may paste here: the share
+    // link for one specific sent offer (https://steamcommunity.com/tradeoffer/1234567890/)
+    // and a direct trade URL (/tradeoffer/new/?partner=...&token=...). Both open
+    // the right place for the buyer, so both pass; the host and path are still
+    // pinned so a typo or a phishing look-alike is rejected.
+    const offerUrlPattern = /^https:\/\/steamcommunity\.com\/tradeoffer\/([0-9]+\/?|new\/?\?partner=\d{5,12}&token=[A-Za-z0-9_-]{4,32}\/?)$/i;
+    if (typeof steamOfferUrl !== 'string' || !offerUrlPattern.test(steamOfferUrl.trim())) {
         throw new OrderAdminError(
             'INVALID_OFFER_URL',
-            'steam_offer_url must be the share link Steam shows for the sent offer (https://steamcommunity.com/tradeoffer/<id>)',
+            'steam_offer_url must be a Steam trade link (https://steamcommunity.com/tradeoffer/<id> or /tradeoffer/new/?partner=...&token=...)',
             400
         );
     }
