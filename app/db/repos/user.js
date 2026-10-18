@@ -73,15 +73,44 @@ class User {
         return this.update(id, { name: name ?? null, avatar: avatar ?? null });
     }
 
+    /**
+     * The admin user-management projection: every column an administrator can act
+     * on, and nothing more sensitive than that.
+     *
+     * `token` is still the line that is never crossed - it is a live session
+     * credential, not a profile field. Everything else the sign-up flows write
+     * (email, Steam identity, trade URL, avatar, last login) belongs on this page,
+     * because granting or refusing permissions is exactly the decision those
+     * fields inform.
+     *
+     * `balance` rides along as a correlated sum using the same ledger arithmetic
+     * the wallet page shows. With the handful of rows a shop carries that is
+     * cheaper than a second round-trip per user, and it cannot drift: it is
+     * derived, never stored.
+     */
     all() {
         return new Promise((resolve , reject) => {
 
             // Only safe columns: never expose token.
-            db.all(`SELECT id, name, phone, permission, created_at FROM users ORDER BY created_at DESC`, function(err , rows) {
-                if(err) return reject(err);
-    
-                resolve(rows);
-            });
+            db.all(
+                `SELECT u.id, u.name, u.phone, u.email, u.steam_id, u.trade_url, u.avatar,
+                        u.permission, u.created_at, u.loggedin_at,
+                        COALESCE((
+                            SELECT SUM(CASE
+                                WHEN w.type = 'topup'    THEN  w.amount
+                                WHEN w.type = 'purchase' THEN -w.amount
+                                WHEN w.type = 'refund'   THEN  w.amount
+                                ELSE 0 END)
+                            FROM wallet_transactions w WHERE w.user_id = u.id
+                        ), 0) AS balance
+                 FROM users u
+                 ORDER BY u.created_at DESC`,
+                function(err , rows) {
+                    if(err) return reject(err);
+        
+                    resolve(rows);
+                }
+            );
     
         });
     }

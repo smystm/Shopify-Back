@@ -119,12 +119,98 @@ class Order {
         });
     }
 
+    /**
+     * The back office's status write: by id alone, no buyer scope.
+     *
+     * The mandatory `canTransition` check still happens in the caller - the
+     * difference from `setStatus` is only whose orders it may touch, because an
+     * administrator acts on the whole book while a customer acts on exactly
+     * one row of their own.
+     */
+    setStatusAdmin(id, status) {
+        return new Promise((resolve, reject) => {
+            db.run(
+                `UPDATE orders SET status = ?, updated_at = ? WHERE id = ?`,
+                [status, Date.now(), id],
+                function (err) {
+                    if (err) return reject(err);
+                    resolve(this.changes > 0);
+                }
+            );
+        });
+    }
+
     /** Order count by status key, for the panel's stat tiles. */
     countsForUser(userId) {
         return new Promise((resolve, reject) => {
             db.all(
                 `SELECT status, COUNT(*) AS count FROM orders WHERE user_id = ? GROUP BY status`,
                 [userId],
+                (err, rows) => {
+                    if (err) return reject(err);
+                    resolve(rows);
+                }
+            );
+        });
+    }
+
+    // ---- Back-office projections ----
+    // Deliberately separate from the customer queries above: the same tables,
+    // but joined to the buyer instead of scoped by them. An administrator needs
+    // to see whose order it is; a customer must never see that field for
+    // anybody else.
+
+    /** Every order with the buyer attached, newest first, for the admin panel. */
+    allForAdmin() {
+        return new Promise((resolve, reject) => {
+            db.all(
+                `SELECT o.id, o.user_id, o.status, o.total, o.created_at, o.updated_at,
+                        u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
+                        u.steam_id AS user_steam_id, u.trade_url AS user_trade_url
+                 FROM orders o
+                 LEFT JOIN users u ON u.id = o.user_id
+                 ORDER BY o.created_at DESC`,
+                async (err, rows) => {
+                    if (err) return reject(err);
+                    try {
+                        resolve(await this.attachItems(rows));
+                    } catch (e) {
+                        reject(e);
+                    }
+                }
+            );
+        });
+    }
+
+    /** One order with the buyer attached, for the admin detail view. */
+    findForAdmin(id) {
+        return new Promise((resolve, reject) => {
+            db.get(
+                `SELECT o.id, o.user_id, o.status, o.total, o.created_at, o.updated_at,
+                        u.name AS user_name, u.phone AS user_phone, u.email AS user_email,
+                        u.steam_id AS user_steam_id, u.trade_url AS user_trade_url
+                 FROM orders o
+                 LEFT JOIN users u ON u.id = o.user_id
+                 WHERE o.id = ?`,
+                [id],
+                async (err, row) => {
+                    if (err) return reject(err);
+                    if (!row) return resolve(null);
+                    try {
+                        resolve((await this.attachItems([row]))[0]);
+                    } catch (e) {
+                        reject(e);
+                    }
+                }
+            );
+        });
+    }
+
+    /** Order count by status across the whole shop, for the admin stat tiles. */
+    countsForAdmin() {
+        return new Promise((resolve, reject) => {
+            db.all(
+                `SELECT status, COUNT(*) AS count FROM orders GROUP BY status`,
                 (err, rows) => {
                     if (err) return reject(err);
                     resolve(rows);

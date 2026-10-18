@@ -3,6 +3,7 @@ var router = express.Router();
 var authMiddleware = require('./middlewares/auth');
 var productRepo = require('../app/db/repos/product');
 var { productImageForTitle, productImageForCategory } = require('../app/services/productImages');
+var { specFieldsFromBody, SpecValidationError } = require('../app/services/productSpecs');
 const { canViewProducts, canCreateProducts, canModifyProduct } = require('../app/services/permissions');
 
 // comment code : Only users with some product access can list products.
@@ -54,10 +55,27 @@ router.post('/', authMiddleware, async (req, res, next) => {
       return res.status(400).json({ status: 'fail', message: 'productNumber and title are required' });
     }
 
-    const image = category ? await productImageForCategory(category.value, title) : await productImageForTitle(title);
+    // The CS2 specification columns - exterior, float band, rarity, stock and
+    // friends. Validated and coerced in one place; a bad figure answers 400
+    // naming every field at once rather than 500 from SQLite.
+    let specs;
+    try {
+      specs = specFieldsFromBody(req.body);
+    } catch (err) {
+      if (err instanceof SpecValidationError) {
+        return res.status(400).json({ status: 'fail', message: err.errors.join(' '), errors: err.errors });
+      }
+      throw err;
+    }
+
+    // An explicitly provided image wins; the auto-derived artwork is only for a
+    // row the admin did not name a file for.
+    const image = typeof req.body.image === 'string' && req.body.image.trim() !== ''
+      ? req.body.image.trim()
+      : (category ? await productImageForCategory(category.value, title) : await productImageForTitle(title));
 
     // Store the creator so self-add users can edit/delete their own products later.
-    const result = await productRepo.create({ productNumber, title, desc, category, price, image, created_by: req.user.id });
+    const result = await productRepo.create({ productNumber, title, desc, category, price, image, created_by: req.user.id, ...specs });
     const product = await productRepo.findBy('id', result.id);
 
     res.status(201).json({ status: 'success', product });
@@ -84,8 +102,24 @@ router.put('/:id', authMiddleware, async (req, res, next) => {
       return res.status(403).json({ status: 'fail', message: 'You do not have permission to edit this product' });
     }
 
-    const image = category ? await productImageForCategory(category.value, title) : await productImageForTitle(title);
-    await productRepo.update(id, { productNumber, title, desc, category, price, image });
+    let specs;
+    try {
+      specs = specFieldsFromBody(req.body);
+    } catch (err) {
+      if (err instanceof SpecValidationError) {
+        return res.status(400).json({ status: 'fail', message: err.errors.join(' '), errors: err.errors });
+      }
+      throw err;
+    }
+
+    // An explicit image keeps the row exactly as the admin set it; only an
+    // absent (or cleared) one falls back to the category-derived artwork.
+    // Recomputing on every save used to silently overwrite a hand-picked URL.
+    const image = typeof req.body.image === 'string' && req.body.image.trim() !== ''
+      ? req.body.image.trim()
+      : (category ? await productImageForCategory(category.value, title) : await productImageForTitle(title));
+
+    await productRepo.update(id, { productNumber, title, desc, category, price, image, ...specs });
     const product = await productRepo.findBy('id', id);
 
     res.json({ status: 'success', product });

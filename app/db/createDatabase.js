@@ -276,6 +276,15 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
         // ---- Customer account tables ----
         // A skin is delivered through a Steam trade, not a shipment, so order
         // status tracks the escrow -> trade -> completed lifecycle.
+        //
+        // Every dependent index is created inside its table's completion
+        // callback. sqlite3 does not promise statement order across separate
+        // prepares, and on a database that already had these tables an index
+        // racing ahead of a no-op CREATE TABLE was harmless - it simply
+        // re-landed. On a brand-new one (a container's first boot against a
+        // fresh volume) the same race dies with "no such table", so the
+        // ordering here is causal: the index runs exactly when the table
+        // provably exists.
         db.run(`CREATE TABLE IF NOT EXISTS orders (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id INTEGER NOT NULL,
@@ -283,7 +292,10 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 total REAL DEFAULT 0,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                db.run(`CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id, created_at)`, (err) => { if (err) console.log(err) })
+            })
 
         // Items are snapshotted so order history survives a product being edited or deleted.
         //
@@ -334,7 +346,10 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 amount REAL NOT NULL,
                 reference text,
                 created_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                db.run(`CREATE INDEX IF NOT EXISTS idx_wallet_user ON wallet_transactions (user_id, created_at)`, (err) => { if (err) console.log(err) })
+            })
 
         db.run(`CREATE TABLE IF NOT EXISTS wishlist (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -342,11 +357,10 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 product_id INTEGER NOT NULL,
                 target_price REAL,
                 created_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
-
-        db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlist_user_product ON wishlist (user_id, product_id)`, (err) => { if (err) console.log(err) })
-        db.run(`CREATE INDEX IF NOT EXISTS idx_orders_user ON orders (user_id, created_at)`, (err) => { if (err) console.log(err) })
-        db.run(`CREATE INDEX IF NOT EXISTS idx_wallet_user ON wallet_transactions (user_id, created_at)`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_wishlist_user_product ON wishlist (user_id, product_id)`, (err) => { if (err) console.log(err) })
+            })
 
         // ---- Non-skin goods: CS2 Prime and TF2 Mann Co. keys ----
         // Priced here rather than in `products` on purpose. A product's category
@@ -374,17 +388,20 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 position INTEGER DEFAULT 0,
                 image text,
                 updated_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                // Makes scripts/seed-services.js re-runnable: the upsert matches
+                // on this pair, so re-seeding rewrites the numbers instead of
+                // duplicating rows. Inside the callback for the same reason as
+                // the indexes above.
+                db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_service_prices_service_variant ON service_prices (service, variant)`, (err) => { if (err) console.log(err) })
+            })
 
         db.all(`PRAGMA table_info(service_prices)`, (err, columns) => {
             if (err) return;
             const colNames = columns.map(c => c.name);
             if (!colNames.includes('image')) db.run('ALTER TABLE service_prices ADD COLUMN image text', () => {});
         })
-
-        // Makes scripts/seed-services.js re-runnable: the upsert matches on this
-        // pair, so re-seeding rewrites the numbers instead of duplicating rows.
-        db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_service_prices_service_variant ON service_prices (service, variant)`, (err) => { if (err) console.log(err) })
 
         // ---- The cart ----
         // Unpaid, mutable staging area. Orders are the immutable record; a cart
@@ -406,13 +423,16 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 quantity INTEGER NOT NULL DEFAULT 1,
                 created_at TIMESTAMP,
                 updated_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
-
-        // Partial indexes: two line kinds live in one table but each needs its own
-        // uniqueness rule, so each index only covers the rows it describes. This is
-        // what makes "add to cart" a real upsert instead of a duplicate line.
-        db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_user_product ON cart_items (user_id, product_id) WHERE product_id IS NOT NULL`, (err) => { if (err) console.log(err) })
-        db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_user_service ON cart_items (user_id, service, variant) WHERE service IS NOT NULL`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                // Partial indexes: two line kinds live in one table but each needs
+                // its own uniqueness rule, so each index only covers the rows it
+                // describes. This is what makes "add to cart" a real upsert
+                // instead of a duplicate line. Created here, inside the callback,
+                // so a first boot cannot race an index against its own table.
+                db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_user_product ON cart_items (user_id, product_id) WHERE product_id IS NOT NULL`, (err) => { if (err) console.log(err) })
+                db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_cart_user_service ON cart_items (user_id, service, variant) WHERE service IS NOT NULL`, (err) => { if (err) console.log(err) })
+            })
 
         // ---- Payment intents ----
         // A record of one attempt to move money through a gateway. Kept separate
@@ -432,10 +452,11 @@ let db = new sqlite3.Database(DBSOURCE, (err) => {
                 reference_id text,
                 created_at TIMESTAMP,
                 paid_at TIMESTAMP
-             )`, (err) => { if (err) console.log(err) })
-
-        db.run(`CREATE INDEX IF NOT EXISTS idx_payment_intents_user ON payment_intents (user_id, created_at)`, (err) => { if (err) console.log(err) })
-        db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_intents_authority ON payment_intents (provider, authority) WHERE authority IS NOT NULL`, (err) => { if (err) console.log(err) })
+             )`, (err) => {
+                if (err) return console.log(err);
+                db.run(`CREATE INDEX IF NOT EXISTS idx_payment_intents_user ON payment_intents (user_id, created_at)`, (err) => { if (err) console.log(err) })
+                db.run(`CREATE UNIQUE INDEX IF NOT EXISTS idx_payment_intents_authority ON payment_intents (provider, authority) WHERE authority IS NOT NULL`, (err) => { if (err) console.log(err) })
+            })
     }
 });
 

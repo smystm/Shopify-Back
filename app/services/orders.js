@@ -52,10 +52,17 @@ function isTerminal(status) {
 /**
  * Allowed order-status moves. Kept explicit so a client can never walk an
  * order backwards out of a terminal state.
+ *
+ * `in_escrow -> completed` is on the list for the goods a Steam trade cannot
+ * carry: a CS2 Prime upgrade or a TF2 key bundle is delivered out-of-band, so
+ * the shop completes those orders itself rather than first inventing a trade
+ * offer nobody sent. Skin orders still travel the normal escrow -> trade ->
+ * completed path - an admin jumping them straight to completed without a
+ * trade would leave the buyer with a claimed item and no offer to accept.
  */
 const ALLOWED_TRANSITIONS = {
     [ORDER_STATUS.PENDING_PAYMENT]: [ORDER_STATUS.IN_ESCROW, ORDER_STATUS.CANCELLED, ORDER_STATUS.REFUNDED],
-    [ORDER_STATUS.IN_ESCROW]: [ORDER_STATUS.TRADE_SENT, ORDER_STATUS.DISPUTED, ORDER_STATUS.REFUNDED, ORDER_STATUS.CANCELLED],
+    [ORDER_STATUS.IN_ESCROW]: [ORDER_STATUS.TRADE_SENT, ORDER_STATUS.COMPLETED, ORDER_STATUS.DISPUTED, ORDER_STATUS.REFUNDED, ORDER_STATUS.CANCELLED],
     [ORDER_STATUS.TRADE_SENT]: [ORDER_STATUS.COMPLETED, ORDER_STATUS.DISPUTED, ORDER_STATUS.REFUNDED],
     [ORDER_STATUS.DISPUTED]: [ORDER_STATUS.COMPLETED, ORDER_STATUS.REFUNDED],
     [ORDER_STATUS.COMPLETED]: [],

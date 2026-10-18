@@ -18,17 +18,36 @@ const PUBLIC_COLUMNS = `id, productNumber, title, desc, category, price, image, 
 
 class Product {
 
+    /**
+     * Columns this repo is willing to INSERT, with how each is bound.
+     *
+     * The route is the whitelister - it decides what a request body may say -
+     * and this table is what decides what may reach a column at all, so an
+     * unexpected key in `data` is skipped rather than interpolated into the
+     * SQL. `created_at` is always supplied by the repo itself.
+     */
+    static WRITABLE = ['productNumber', 'title', 'desc', 'category', 'price', 'image', 'created_by',
+        'count', 'exterior', 'float_min', 'float_max', 'pattern_index', 'stattrak', 'souvenir',
+        'rarity', 'collection', 'release_at'];
+
     create(data) {
         return new Promise((resolve, reject) => {
-            let sql = 'INSERT INTO products (productNumber, title, desc, category, price, image, created_by, count, created_at) VALUES (?,?,?,?,?,?,?,?,?)'
+            // Only the keys both sides agreed on, plus the created_at the repo owns.
+            const columns = [...Product.WRITABLE.filter((key) => key in data), 'created_at'];
+            const placeholders = columns.map(() => '?').join(', ');
+            const values = columns.map((key) => {
+                if (key === 'created_at') return Date.now();
+                if (key === 'category') return typeof data.category === 'object' ? JSON.stringify(data.category) : data.category;
+                // Defaults to 1 rather than NULL. A NULL would read as one anyway, but
+                // writing the figure explicitly means the row says what it means and
+                // the admin panel has something to show.
+                if (key === 'count') return Number.isFinite(data.count) && data.count > 0 ? Math.floor(data.count) : 1;
+                return data[key] ?? null;
+            });
 
-            const category = typeof data.category === 'object' ? JSON.stringify(data.category) : data.category;
-            // Defaults to 1 rather than NULL. A NULL would read as one anyway, but
-            // writing the figure explicitly means the row says what it means and
-            // the admin panel has something to show.
-            const count = Number.isFinite(data.count) && data.count > 0 ? Math.floor(data.count) : 1;
+            const sql = `INSERT INTO products (${columns.join(', ')}) VALUES (${placeholders})`;
 
-            db.run(sql, [data.productNumber, data.title, data.desc, category, data.price, data.image ?? null, data.created_by ?? null, count, Date.now()], function (err) {
+            db.run(sql, values, function (err) {
                 if (err) return reject(err);
 
                 resolve({ id: this.lastID });
